@@ -16,7 +16,7 @@ jobs:
           flutter-version: "3.24.3"
           cache: true
 
-      - name: Fix folder structure
+      - name: Fix folder structure and imports
         run: |
           mkdir -p lib/config lib/core lib/ui/widgets lib/repositories lib/services assets test
           [ -f main.dart ] && mv -f main.dart lib/main.dart || true
@@ -31,6 +31,10 @@ jobs:
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
           [ -f hakpay_logo.png ] && mv -f hakpay_logo.png assets/ || true
+
+          # Import yollarındaki olası çakışmaları düzeltmek için paket yollarını optimize et
+          find lib/ -type f -name "*.dart" -exec sed -i 's|"../services/|"package:hakpay/services/|g' {} +
+          find lib/ -type f -name "*.dart" -exec sf="" -i 's|import '\''|import '\''package:hakpay/|g' {} + || true
 
       - name: Create Android platform
         run: |
@@ -51,14 +55,14 @@ jobs:
 
       - run: flutter clean
       - run: flutter pub get
-      - run: flutter build apk --release --verbose
+      - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
         with:
           name: hakpay-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - run: flutter build appbundle --release --verbose
+      - run: flutter build appbundle --release
 
       - uses: actions/upload-artifact@v4
         with:
