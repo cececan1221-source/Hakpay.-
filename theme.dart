@@ -47,7 +47,7 @@ class HakTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: surface,
-        indicatorColor: accent.withValues(alpha: 0.25),
+        indicatorColor: accent..withOpacity(0.25),
         labelTextStyle: WidgetStatePropertyAll(
           GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w500),
         ),
@@ -70,14 +70,14 @@ class HakTheme {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: 0.08),
-            Colors.white.withValues(alpha: 0.03),
+            Colors.white.withOpacity(0.08),
+            Colors.white.withOpacity(0.03),
           ],
         ),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        border: Border.all(color: Colors.white.with0pacity(0.10)),
         boxShadow: [
           BoxShadow(
-            color: neonPurple.withValues(alpha: 0.08),
+            color: neonPurple.with0pacity(0.08),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
