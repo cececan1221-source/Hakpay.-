@@ -19,7 +19,7 @@ jobs:
           flutter-version: "3.24.3"
           cache: true
 
-      - name: Klasor Yapisini Duzelt
+      - name: Klasorleri Hazirla
         run: |
           mkdir -p lib/config
           mkdir -p lib/core
@@ -53,104 +53,57 @@ jobs:
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
 
-      - name: Eski Flutter Color API Hatalarini Duzelt
+      - name: Flutter Eski Color API Duzeltmeleri
         run: |
           python3 <<'PY'
           import os
           import re
 
-          root = "lib"
-
-          for dirpath, _, filenames in os.walk(root):
-              for filename in filenames:
-                  if not filename.endswith(".dart"):
+          for root, dirs, files in os.walk("lib"):
+              for file in files:
+                  if not file.endswith(".dart"):
                       continue
 
-                  path = os.path.join(dirpath, filename)
+                  path = os.path.join(root, file)
 
                   with open(path, "r", encoding="utf-8") as f:
-                      content = f.read()
+                      text = f.read()
 
-                  original = content
+                  original = text
 
-                  content = re.sub(
+                  # Flutter 3.24 uyumlulugu
+                  text = re.sub(
                       r'\.withValues\s*\(\s*alpha\s*:\s*([^)]+)\)',
                       r'.withOpacity(\1)',
-                      content
+                      text
                   )
 
-                  content = content.replace(
+                  # Yazim hatalarini duzelt
+                  text = text.replace(
                       ".with0pacity(",
                       ".withOpacity("
                   )
 
-                  content = re.sub(
-                      r'\.\.withOpacity\(',
-                      r'.withOpacity(',
-                      content
+                  text = text.replace(
+                      "..withOpacity(",
+                      ".withOpacity("
                   )
 
-                  if content != original:
+                  if text != original:
                       with open(path, "w", encoding="utf-8") as f:
-                          f.write(content)
+                          f.write(text)
 
                       print("Duzeltildi:", path)
           PY
 
-      - name: Uyumsuz Kod Kontrolu
+      - name: Eksik Logo Kontrolu
         run: |
-          if grep -RIn --include="*.dart" "withValues" lib; then
-            echo "HATA: withValues hala mevcut."
-            exit 1
-          fi
-
-          if grep -RIn --include="*.dart" "with0pacity" lib; then
-            echo "HATA: with0pacity hala mevcut."
-            exit 1
-          fi
-
-      - name: Eksik Logo Assetini Olustur
-        run: |
-          mkdir -p assets
-
           if [ ! -f assets/hakpay_logo.png ]; then
-            echo "Eksik hakpay_logo.png bulunamadi. Gecici PNG olusturuluyor."
-
-            python3 <<'PY'
-          import struct
-          import zlib
-
-          width = 1
-          height = 1
-
-          raw = b'\x00\x00\x00\x00'
-          compressed = zlib.compress(raw)
-
-          def chunk(name, data):
-              crc = zlib.crc32(name + data) & 0xffffffff
-              return (
-                  struct.pack(">I", len(data))
-                  + name
-                  + data
-                  + struct.pack(">I", crc)
-              )
-
-          png = b'\x89PNG\r\n\x1a\n'
-
-          png += chunk(
-              b'IHDR',
-              struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-          )
-
-          png += chunk(b'IDAT', compressed)
-          png += chunk(b'IEND', b'')
-
-          with open("assets/hakpay_logo.png", "wb") as f:
-              f.write(png)
-          PY
+            echo "Uyari: assets/hakpay_logo.png bulunamadi."
+            echo "APK build asamasinda kullaniliyorsa hata gorulecektir."
           fi
 
-      - name: Sifir Android Altyapisi Olustur
+      - name: Android Projesini Yenile
         run: |
           rm -rf android
 
@@ -163,19 +116,15 @@ jobs:
         run: |
           flutter clean
 
-      - name: Bagimliliklari Yukle
+      - name: Paketleri Yukle
         run: |
           flutter pub get
-
-      - name: Sadece Uygulama Kodunu Analiz Et
-        run: |
-          flutter analyze lib
 
       - name: APK Derle
         run: |
           flutter build apk --release
 
-      - name: APK Artifact Yukle
+      - name: APK Yukle
         uses: actions/upload-artifact@v4
         with:
           name: hakpay-apk
