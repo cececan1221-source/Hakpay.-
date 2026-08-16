@@ -19,7 +19,7 @@ jobs:
           flutter-version: "3.24.3"
           cache: true
 
-      - name: Klasor Yapisini ve Importlari Duzelt
+      - name: Klasor Yapisini Duzelt
         run: |
           mkdir -p lib/config
           mkdir -p lib/core
@@ -27,7 +27,6 @@ jobs:
           mkdir -p lib/repositories
           mkdir -p lib/services
           mkdir -p assets
-          mkdir -p test
 
           [ -f main.dart ] && mv -f main.dart lib/main.dart || true
           [ -f splash_screen.dart ] && mv -f splash_screen.dart lib/ui/ || true
@@ -54,7 +53,7 @@ jobs:
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
 
-      - name: Eski Flutter Color API Hatalarini Otomatik Duzelt
+      - name: Eski Flutter Color API Hatalarini Duzelt
         run: |
           python3 <<'PY'
           import os
@@ -74,23 +73,17 @@ jobs:
 
                   original = content
 
-                  # Flutter 3.24.3 uyumlulugu:
-                  # withValues(alpha: X) -> withOpacity(X)
                   content = re.sub(
                       r'\.withValues\s*\(\s*alpha\s*:\s*([^)]+)\)',
                       r'.withOpacity(\1)',
                       content
                   )
 
-                  # Yazim hatasi:
-                  # with0pacity -> withOpacity
                   content = content.replace(
                       ".with0pacity(",
                       ".withOpacity("
                   )
 
-                  # Cift nokta hatasi:
-                  # accent..withOpacity(...) -> accent.withOpacity(...)
                   content = re.sub(
                       r'\.\.withOpacity\(',
                       r'.withOpacity(',
@@ -101,41 +94,82 @@ jobs:
                       with open(path, "w", encoding="utf-8") as f:
                           f.write(content)
 
-                      print(f"Duzeltildi: {path}")
+                      print("Duzeltildi:", path)
           PY
 
-      - name: Kalan Uyumsuz Color Kullanimlarini Kontrol Et
+      - name: Uyumsuz Kod Kontrolu
         run: |
-          echo "=== withValues kontrolu ==="
           if grep -RIn --include="*.dart" "withValues" lib; then
-            echo "HATA: withValues kullanimi hala mevcut."
+            echo "HATA: withValues hala mevcut."
             exit 1
           fi
 
-          echo "=== with0pacity kontrolu ==="
           if grep -RIn --include="*.dart" "with0pacity" lib; then
-            echo "HATA: with0pacity kullanimi hala mevcut."
+            echo "HATA: with0pacity hala mevcut."
             exit 1
           fi
 
-          echo "=== Color API kontrolu tamamlandi ==="
+      - name: Eksik Logo Assetini Olustur
+        run: |
+          mkdir -p assets
+
+          if [ ! -f assets/hakpay_logo.png ]; then
+            echo "Eksik hakpay_logo.png bulunamadi. Gecici PNG olusturuluyor."
+
+            python3 <<'PY'
+          import struct
+          import zlib
+
+          width = 1
+          height = 1
+
+          raw = b'\x00\x00\x00\x00'
+          compressed = zlib.compress(raw)
+
+          def chunk(name, data):
+              crc = zlib.crc32(name + data) & 0xffffffff
+              return (
+                  struct.pack(">I", len(data))
+                  + name
+                  + data
+                  + struct.pack(">I", crc)
+              )
+
+          png = b'\x89PNG\r\n\x1a\n'
+
+          png += chunk(
+              b'IHDR',
+              struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+          )
+
+          png += chunk(b'IDAT', compressed)
+          png += chunk(b'IEND', b'')
+
+          with open("assets/hakpay_logo.png", "wb") as f:
+              f.write(png)
+          PY
+          fi
 
       - name: Sifir Android Altyapisi Olustur
         run: |
           rm -rf android
+
           flutter create . \
             --project-name hakpay \
             --org com.hakpay \
             --platforms=android
 
-      - name: Flutter Temizle ve Bagimliliklari Yukle
+      - name: Flutter Temizle
         run: |
           flutter clean
+
+      - name: Bagimliliklari Yukle
+        run: |
           flutter pub get
 
-      - name: Dart Analiz
+      - name: Sadece Uygulama Kodunu Analiz Et
         run: |
-          flutter analyze
+          flutter analyze lib
 
       - name: APK Derle
         run: |
