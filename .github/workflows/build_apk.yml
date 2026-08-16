@@ -1,0 +1,62 @@
+name: HakPay Android Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Fix folder structure
+        run: |
+          mkdir -p lib/config lib/core lib/ui/widgets lib/repositories lib/services assets test
+          [ -f main.dart ] && mv -f main.dart lib/main.dart || true
+          [ -f splash_screen.dart ] && mv -f splash_screen.dart lib/ui/ || true
+          [ -f legacy_app.dart ] && mv -f legacy_app.dart lib/ui/ || true
+          [ -f theme.dart ] && mv -f theme.dart lib/ui/ || true
+          [ -f app_config.dart ] && mv -f app_config.dart lib/config/ || true
+          [ -f result.dart ] && mv -f result.dart lib/core/ || true
+          [ -f catalog_repository.dart ] && mv -f catalog_repository.dart lib/repositories/ || true
+          [ -f glass_card.dart ] && mv -f glass_card.dart lib/ui/widgets/ || true
+          for f in ad_service.dart api_client.dart auth_service.dart billing_service.dart callback_verify.dart notification_service.dart service_locator.dart streak_referral_service.dart wallet_service.dart withdrawal_service.dart admob_ad_service.dart; do
+            [ -f "$f" ] && mv -f "$f" lib/services/ || true
+          done
+          [ -f hakpay_logo.png ] && mv -f hakpay_logo.png assets/ || true
+          sed -i '/google_mobile_ads/d' pubspec.yaml || true
+          sed -i '/in_app_purchase/d' pubspec.yaml || true
+          rm -f pubspec.lock
+          if [ -f lib/services/service_locator.dart ]; then
+            sed -i "/admob_ad_service/d" lib/services/service_locator.dart || true
+            sed -i 's/createAdMobAwareAdService(api, wallet)/createAdService(api, wallet)/g' lib/services/service_locator.dart || true
+          fi
+          echo "// MVP AdMob off" > lib/services/admob_ad_service.dart
+
+      - name: Create Android platform
+        run: |
+          if [ ! -d android ]; then
+            flutter create . --project-name hakpay --org com.hakpay --platforms=android
+          fi
+
+      - run: flutter pub get
+      - run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hakpay-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - run: flutter build appbundle --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hakpay-aab
+          path: build/app/outputs/bundle/release/app-release.aab
