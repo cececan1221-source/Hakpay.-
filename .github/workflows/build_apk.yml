@@ -13,7 +13,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.19.0"
           cache: true
 
       - name: Fix folder structure
@@ -31,19 +31,22 @@ jobs:
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
           [ -f hakpay_logo.png ] && mv -f hakpay_logo.png assets/ || true
-          sed -i '/google_mobile_ads/d' pubspec.yaml || true
-          sed -i '/in_app_purchase/d' pubspec.yaml || true
-          rm -f pubspec.lock
-          if [ -f lib/services/service_locator.dart ]; then
-            sed -i "/admob_ad_service/d" lib/services/service_locator.dart || true
-            sed -i 's/createAdMobAwareAdService(api, wallet)/createAdService(api, wallet)/g' lib/services/service_locator.dart || true
-          fi
-          echo "// MVP AdMob off" > lib/services/admob_ad_service.dart
 
       - name: Create Android platform
         run: |
           if [ ! -d android ]; then
             flutter create . --project-name hakpay --org com.hakpay --platforms=android
+          fi
+
+      - name: Inject AdMob App ID into AndroidManifest
+        env:
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST_PATH" ] && [ -n "$ADMOB_APP_ID" ]; then
+            if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" "$MANIFEST_PATH"; then
+              sed -i '/<application>/a \    <meta-data\n        android:name="com.google.android.gms.ads.APPLICATION_ID"\n        android:value="'"$ADMOB_APP_ID"'"/>' "$MANIFEST_PATH"
+            fi
           fi
 
       - run: flutter pub get
@@ -60,3 +63,4 @@ jobs:
         with:
           name: hakpay-aab
           path: build/app/outputs/bundle/release/app-release.aab
+          
