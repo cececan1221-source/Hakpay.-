@@ -3,128 +3,77 @@ name: HakPay Android Release
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 jobs:
   build:
+    name: Build HakPay APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Repository Checkout
+      # 1. Kodu indir
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Flutter Kurulumu
+      # 2. Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24.3"
+          channel: stable
           cache: true
 
-      - name: Klasorleri Hazirla
+      # 3. Projenin mevcut yapısını KORU
+      - name: Check Project
         run: |
-          mkdir -p lib/config
-          mkdir -p lib/core
-          mkdir -p lib/ui/widgets
-          mkdir -p lib/repositories
-          mkdir -p lib/services
-          mkdir -p assets
+          echo "Flutter:"
+          flutter --version
 
-          [ -f main.dart ] && mv -f main.dart lib/main.dart || true
-          [ -f splash_screen.dart ] && mv -f splash_screen.dart lib/ui/ || true
-          [ -f legacy_app.dart ] && mv -f legacy_app.dart lib/ui/ || true
-          [ -f theme.dart ] && mv -f theme.dart lib/ui/ || true
-          [ -f app_config.dart ] && mv -f app_config.dart lib/config/ || true
-          [ -f result.dart ] && mv -f result.dart lib/core/ || true
-          [ -f catalog_repository.dart ] && mv -f catalog_repository.dart lib/repositories/ || true
-          [ -f glass_card.dart ] && mv -f glass_card.dart lib/ui/widgets/ || true
+          echo ""
+          echo "Dart files:"
+          find lib -type f -name "*.dart" | sort
 
-          for f in \
-            ad_service.dart \
-            api_client.dart \
-            auth_service.dart \
-            billing_service.dart \
-            callback_verify.dart \
-            notification_service.dart \
-            service_locator.dart \
-            streak_referral_service.dart \
-            wallet_service.dart \
-            withdrawal_service.dart \
-            admob_ad_service.dart
-          do
-            [ -f "$f" ] && mv -f "$f" lib/services/ || true
-          done
-
-      - name: Flutter Eski Color API Duzeltmeleri
-        run: |
-          python3 <<'PY'
-          import os
-          import re
-
-          for root, dirs, files in os.walk("lib"):
-              for file in files:
-                  if not file.endswith(".dart"):
-                      continue
-
-                  path = os.path.join(root, file)
-
-                  with open(path, "r", encoding="utf-8") as f:
-                      text = f.read()
-
-                  original = text
-
-                  # Flutter 3.24 uyumlulugu
-                  text = re.sub(
-                      r'\.withValues\s*\(\s*alpha\s*:\s*([^)]+)\)',
-                      r'.withOpacity(\1)',
-                      text
-                  )
-
-                  # Yazim hatalarini duzelt
-                  text = text.replace(
-                      ".with0pacity(",
-                      ".withOpacity("
-                  )
-
-                  text = text.replace(
-                      "..withOpacity(",
-                      ".withOpacity("
-                  )
-
-                  if text != original:
-                      with open(path, "w", encoding="utf-8") as f:
-                          f.write(text)
-
-                      print("Duzeltildi:", path)
-          PY
-
-      - name: Eksik Logo Kontrolu
-        run: |
-          if [ ! -f assets/hakpay_logo.png ]; then
-            echo "Uyari: assets/hakpay_logo.png bulunamadi."
-            echo "APK build asamasinda kullaniliyorsa hata gorulecektir."
+          echo ""
+          echo "Main:"
+          if [ -f lib/main.dart ]; then
+            echo "lib/main.dart bulundu"
+          else
+            echo "HATA: lib/main.dart bulunamadi"
+            exit 1
           fi
 
-      - name: Android Projesini Yenile
-        run: |
-          rm -rf android
+          echo ""
+          echo "Pubspec:"
+          if [ -f pubspec.yaml ]; then
+            echo "pubspec.yaml bulundu"
+          else
+            echo "HATA: pubspec.yaml bulunamadi"
+            exit 1
+          fi
 
-          flutter create . \
-            --project-name hakpay \
-            --org com.hakpay \
-            --platforms=android
-
-      - name: Flutter Temizle
-        run: |
-          flutter clean
-
-      - name: Paketleri Yukle
+      # 4. Paketleri yükle
+      - name: Flutter Pub Get
         run: |
           flutter pub get
 
-      - name: APK Derle
+      # 5. Dart analyzer
+      # Info seviyesindeki mesajlar build'i durdurmasin.
+      - name: Dart Analyze
         run: |
+          flutter analyze --no-fatal-infos
+        continue-on-error: false
+
+      # 6. APK
+      - name: Build Release APK
+        run: |
+          flutter clean
+          flutter pub get
           flutter build apk --release
 
-      - name: APK Yukle
+      # 7. APK'yi yükle
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: hakpay-apk
