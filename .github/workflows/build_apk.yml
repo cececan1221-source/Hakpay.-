@@ -16,11 +16,13 @@ jobs:
           flutter-version: "3.24.3"
           cache: true
 
-      - name: Fix folder structure
+      - name: Klasor Yapisini ve Importlari Duzelt
         run: |
-          mkdir -p lib/config lib/core lib/ui/widgets lib/repositories lib/services assets
+          mkdir -p lib/config lib/core lib/ui/widgets lib/repositories lib/services assets test
           [ -f main.dart ] && mv -f main.dart lib/main.dart || true
-          for f in splash_screen.dart legacy_app.dart theme.dart; do [ -f "$f" ] && mv -f "$f" lib/ui/ || true; done
+          [ -f splash_screen.dart ] && mv -f splash_screen.dart lib/ui/ || true
+          [ -f legacy_app.dart ] && mv -f legacy_app.dart lib/ui/ || true
+          [ -f theme.dart ] && mv -f theme.dart lib/ui/ || true
           [ -f app_config.dart ] && mv -f app_config.dart lib/config/ || true
           [ -f result.dart ] && mv -f result.dart lib/core/ || true
           [ -f catalog_repository.dart ] && mv -f catalog_repository.dart lib/repositories/ || true
@@ -29,7 +31,12 @@ jobs:
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
 
-      - name: Build APK
+      - name: Sifir Android Altyapisi Olustur (Gradle Hatasini Cozer)
+        run: |
+          rm -rf android
+          flutter create . --project-name hakpay --org com.hakpay --platforms=android
+
+      - name: APK Derle
         run: |
           flutter clean
           flutter pub get
