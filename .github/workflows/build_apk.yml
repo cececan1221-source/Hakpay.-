@@ -1,4 +1,4 @@
-name: HakPay Android Release
+name: HakPay APK
 
 on:
   workflow_dispatch:
@@ -9,21 +9,21 @@ on:
 
 jobs:
   build:
-    name: HakPay APK
+    name: Build HakPay APK
     runs-on: ubuntu-latest
 
     steps:
 
-      # =========================================================
-      # 1. KODU AL
-      # =========================================================
+      # --------------------------------------------------
+      # 1. Repository
+      # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
 
-      # =========================================================
-      # 2. FLUTTER
-      # =========================================================
+      # --------------------------------------------------
+      # 2. Flutter
+      # --------------------------------------------------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -32,211 +32,176 @@ jobs:
           cache: true
 
 
-      # =========================================================
-      # 3. PROJE YAPISINI HAZIRLA
-      # =========================================================
-      - name: Prepare Flutter Project
-        shell: bash
+      # --------------------------------------------------
+      # 3. Flutter version check
+      # --------------------------------------------------
+      - name: Flutter Version
         run: |
-          set -e
-
-          echo "======================================"
-          echo "PROJE DOSYALARI"
-          echo "======================================"
-
-          find . -maxdepth 3 -type f | sort | head -300
-
-          echo ""
-          echo "======================================"
-          echo "PUBSPEC KONTROL"
-          echo "======================================"
-
-          if [ ! -f pubspec.yaml ]; then
-            echo "HATA: pubspec.yaml bulunamadi."
-            exit 1
-          fi
-
-          echo "pubspec.yaml bulundu."
+          flutter --version
+          dart --version
 
 
-          # -----------------------------------------------------
-          # lib klasoru yoksa olustur
-          # -----------------------------------------------------
+      # --------------------------------------------------
+      # 4. Project folders
+      # --------------------------------------------------
+      - name: Prepare Project
+        run: |
           mkdir -p lib
+          mkdir -p lib/config
+          mkdir -p lib/core
+          mkdir -p lib/services
+          mkdir -p lib/repositories
+          mkdir -p lib/ui
+          mkdir -p lib/ui/widgets
+          mkdir -p assets
+          mkdir -p test
 
 
-          # -----------------------------------------------------
-          # main.dart'i bul
-          # -----------------------------------------------------
-          if [ -f "main.dart" ]; then
-            echo "Root main.dart bulundu."
+      # --------------------------------------------------
+      # 5. Move old root files
+      # --------------------------------------------------
+      - name: Normalize Project Files
+        run: |
+
+          # main.dart
+          if [ -f main.dart ]; then
             mv -f main.dart lib/main.dart
           fi
 
+          # UI files
+          if [ -f splash_screen.dart ]; then
+            mv -f splash_screen.dart lib/ui/splash_screen.dart
+          fi
 
-          # -----------------------------------------------------
-          # main.dart hala yoksa ara
-          # -----------------------------------------------------
-          if [ ! -f "lib/main.dart" ]; then
+          if [ -f legacy_app.dart ]; then
+            mv -f legacy_app.dart lib/ui/legacy_app.dart
+          fi
 
-            MAIN_FILE=$(find . \
-              -type f \
-              -name "main.dart" \
-              -not -path "./.git/*" \
-              -not -path "./build/*" \
-              -not -path "./android/*" \
-              | head -1)
+          if [ -f theme.dart ]; then
+            mv -f theme.dart lib/ui/theme.dart
+          fi
 
-            if [ -n "$MAIN_FILE" ]; then
-              echo "main.dart bulundu: $MAIN_FILE"
-              cp "$MAIN_FILE" lib/main.dart
+          # Config
+          if [ -f app_config.dart ]; then
+            mv -f app_config.dart lib/config/app_config.dart
+          fi
+
+          # Core
+          if [ -f result.dart ]; then
+            mv -f result.dart lib/core/result.dart
+          fi
+
+          # Repository
+          if [ -f catalog_repository.dart ]; then
+            mv -f catalog_repository.dart lib/repositories/catalog_repository.dart
+          fi
+
+          # Widgets
+          if [ -f glass_card.dart ]; then
+            mv -f glass_card.dart lib/ui/widgets/glass_card.dart
+          fi
+
+          # Services
+          for f in \
+            ad_service.dart \
+            api_client.dart \
+            auth_service.dart \
+            billing_service.dart \
+            callback_verify.dart \
+            notification_service.dart \
+            service_locator.dart \
+            streak_referral_service.dart \
+            wallet_service.dart \
+            withdrawal_service.dart \
+            admob_ad_service.dart
+          do
+            if [ -f "$f" ]; then
+              mv -f "$f" "lib/services/$f"
             fi
+          done
+
+
+      # --------------------------------------------------
+      # 6. Remove duplicate legacy service
+      # --------------------------------------------------
+      - name: Remove Duplicate Withdrawal Service
+        run: |
+
+          if [ -f lib/withdrawal_service.dart ]; then
+
+            cat > lib/withdrawal_service.dart <<'EOF'
+          // Compatibility export.
+          //
+          // The actual implementation is located at:
+          // lib/services/withdrawal_service.dart
+
+          export 'services/withdrawal_service.dart';
+          EOF
+
           fi
 
 
-          # -----------------------------------------------------
-          # Root seviyesindeki Dart dosyalarini lib'e tasi
-          # -----------------------------------------------------
-          for file in *.dart; do
-            if [ -f "$file" ]; then
-              if [ "$file" != "main.dart" ]; then
-                echo "Dart dosyasi tasiniyor: $file"
-                mv -f "$file" lib/
-              fi
-            fi
-          done
+      # --------------------------------------------------
+      # 7. Verify project structure
+      # --------------------------------------------------
+      - name: Verify Project
+        run: |
 
+          echo "========== PROJECT =========="
+          find lib -maxdepth 3 -type f | sort
 
-          # -----------------------------------------------------
-          # Bilinen proje klasorlerini lib'e tasi
-          # -----------------------------------------------------
-          for dir in \
-            config \
-            core \
-            ui \
-            services \
-            repositories \
-            models \
-            screens \
-            widgets \
-            providers \
-            utils \
-            data \
-            domain \
-            presentation
-          do
-            if [ -d "$dir" ] && [ "$dir" != "lib" ]; then
-              echo "Klasor tasiniyor: $dir"
-              mv -f "$dir" "lib/$dir"
-            fi
-          done
+          echo ""
+          echo "========== MAIN =========="
 
-
-          # -----------------------------------------------------
-          # main.dart kesinlikle var mi?
-          # -----------------------------------------------------
-          if [ ! -f "lib/main.dart" ]; then
-            echo ""
-            echo "======================================"
-            echo "KRITIK HATA"
-            echo "======================================"
-            echo "lib/main.dart bulunamadi."
-            echo ""
-            echo "Bulunan Dart dosyalari:"
-            find . -type f -name "*.dart" \
-              -not -path "./.git/*" \
-              -not -path "./build/*"
+          if [ ! -f lib/main.dart ]; then
+            echo "ERROR: lib/main.dart bulunamadı."
             exit 1
           fi
 
-
-          echo ""
-          echo "======================================"
-          echo "FINAL FLUTTER YAPISI"
-          echo "======================================"
-
-          find lib -type f -name "*.dart" | sort
+          echo "OK: lib/main.dart"
 
 
-      # =========================================================
-      # 4. ANDROID PLATFORMU
-      # =========================================================
-      - name: Prepare Android
-        shell: bash
+      # --------------------------------------------------
+      # 8. Flutter pubspec
+      # --------------------------------------------------
+      - name: Check Pubspec
         run: |
-          set -e
 
-          if [ ! -d "android" ]; then
-            echo "Android klasoru yok. Flutter Android projesi olusturuluyor."
-
-            flutter create \
-              --platforms=android \
-              --project-name=hakpay \
-              --org=com.hakpay \
-              .
-          else
-            echo "Mevcut Android klasoru korunuyor."
+          if [ ! -f pubspec.yaml ]; then
+            echo "ERROR: pubspec.yaml bulunamadı."
+            exit 1
           fi
 
-
-      # =========================================================
-      # 5. DEPENDENCIES
-      # =========================================================
-      - name: Flutter Pub Get
-        run: |
           flutter pub get
 
 
-      # =========================================================
-      # 6. EKSİK ASSET KONTROLÜ
-      # =========================================================
-      - name: Check Assets
-        shell: bash
+      # --------------------------------------------------
+      # 9. Analyze
+      # --------------------------------------------------
+      - name: Dart Analyze
         run: |
-          set -e
 
-          mkdir -p assets
+          dart analyze --fatal-infos
 
-          if [ ! -f "assets/hakpay_logo.png" ]; then
-            echo "Uyari: assets/hakpay_logo.png bulunamadi."
-            echo "Bos placeholder logo olusturuluyor."
 
-            python3 - <<'PY'
-          import base64
+      # --------------------------------------------------
+      # 10. Tests
+      # --------------------------------------------------
+      - name: Run Tests
+        run: |
 
-          data = base64.b64decode(
-              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-              "+A8AAQUBAScY42YAAAAASUVORK5CYII="
-          )
-
-          with open("assets/hakpay_logo.png", "wb") as f:
-              f.write(data)
-          PY
+          if [ -d test ] && find test -type f -name "*.dart" | grep -q .; then
+            flutter test
           else
-            echo "hakpay_logo.png mevcut."
+            echo "Test dosyası yok, test adımı atlandı."
           fi
 
 
-      # =========================================================
-      # 7. SADECE UYGULAMA KODUNU ANALİZ ET
-      # =========================================================
-      - name: Dart Analyze
-        shell: bash
-        run: |
-          set -e
-
-          echo "Uygulama Dart kodu analiz ediliyor..."
-
-          flutter analyze lib --no-fatal-infos
-
-
-      # =========================================================
-      # 8. APK BUILD
-      # =========================================================
+      # --------------------------------------------------
+      # 11. Build APK
+      # --------------------------------------------------
       - name: Build Release APK
-        shell: bash
         run: |
-          set -e
 
           flutter clean
           flutter pub get
@@ -246,32 +211,26 @@ jobs:
             --no-tree-shake-icons
 
 
-      # =========================================================
-      # 9. APK KONTROL
-      # =========================================================
+      # --------------------------------------------------
+      # 12. Verify APK
+      # --------------------------------------------------
       - name: Check APK
-        shell: bash
         run: |
-          set -e
 
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "HATA: APK olusturulamadi."
+            echo "ERROR: APK oluşturulamadı."
             exit 1
           fi
 
-          echo ""
-          echo "======================================"
-          echo "APK BASARIYLA OLUSTU"
-          echo "======================================"
-
+          echo "APK başarıyla oluşturuldu:"
           ls -lh "$APK"
 
 
-      # =========================================================
-      # 10. APK'YI GITHUB'A YUKLE
-      # =========================================================
+      # --------------------------------------------------
+      # 13. Upload APK
+      # --------------------------------------------------
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
