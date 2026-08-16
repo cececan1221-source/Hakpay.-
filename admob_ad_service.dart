@@ -8,74 +8,176 @@ import '../core/result.dart';
 import 'ad_service.dart';
 import 'wallet_service.dart';
 
-/// Gerçek AdMob rewarded entegrasyonu.
-/// - Test ID'ler varsayılan (Google resmi örnek birimler)
-/// - Production: --dart-define=ADMOB_APP_ID=... ADMOB_REWARDED_ID=...
-/// - Ödül kredisi: demo cüzdanda reference_id; production'da backend claim şart
+/// Gerçek Google AdMob reklam servisi.
+///
+/// AdService arayüzü ile uyumludur:
+/// - openSession()
+/// - claim()
+/// - showRewarded()
+/// - showInterstitial()
+/// - runTripleAdCycle()
+///
+/// Test reklam ID'leri AppConfig tarafından varsayılan olarak kullanılır.
+/// Production ID'leri --dart-define ile verilebilir.
 class AdMobAdService implements AdService {
   AdMobAdService(this._wallet);
 
   final WalletService _wallet;
-  final _uuid = const Uuid();
-  bool _initialized = false;
-  final _open = <String, AdSession>{};
+  final Uuid _uuid = const Uuid();
 
+  bool _initialized = false;
+
+  /// Açılmış reklam oturumları.
+  final Map<String, AdSession> _open = <String, AdSession>{};
+
+  /// Reklamı başarıyla izlenen oturumlar.
+  final Set<String> _watchedSessions = <String>{};
+
+  /// Son gösterilen rewarded reklamın ödül verip vermediği.
+  bool _rewardedEarned = false;
+
+  /// Son interstitial reklam sonucu.
+  bool _interstitialShown = false;
+
+  /// AdMob SDK'yı başlatır.
   Future<void> initialize() async {
     if (_initialized) return;
-    try {
-      await MobileAds.instance.initialize();
-      // İsteğe bağlı: test cihazı
-      // MobileAds.instance.updateRequestConfiguration(
-      //   RequestConfiguration(testDeviceIds: ['YOUR_DEVICE_ID']),
-      // );
-      _initialized = true;
-    } catch (e) {
-      // SDK yüklenemezse üst katman demo'ya düşebilir
-      rethrow;
-    }
+
+    await MobileAds.instance.initialize();
+
+    _initialized = true;
   }
 
+  /// AdMob hazır mı?
   bool get isReady => _initialized;
 
+  /// Rewarded reklam gösterir.
   Future<bool> _showOneRewarded() async {
-    final completer = Completer<bool>();
-    var earned = false;
+    if (!_initialized) {
+      try {
+        await initialize();
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final Completer<bool> completer = Completer<bool>();
+
+    bool earned = false;
 
     await RewardedAd.load(
       adUnitId: AppConfig.effectiveRewardedId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) {
-          ad.fullScreenContentCallback = FullScreenContentCallback(
-            onAdDismissedFullScreenContent: (ad) {
+        onAdLoaded: (RewardedAd ad) {
+          ad.fullScreenContentCallback =
+              FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (Ad ad) {
               ad.dispose();
-              if (!completer.isCompleted) completer.complete(earned);
+
+              if (!completer.isCompleted) {
+                completer.complete(earned);
+              }
             },
-            onAdFailedToShowFullScreenContent: (ad, error) {
+            onAdFailedToShowFullScreenContent:
+                (Ad ad, AdError error) {
               ad.dispose();
-              if (!completer.isCompleted) completer.complete(false);
+
+              if (!completer.isCompleted) {
+                completer.complete(false);
+              }
             },
           );
+
           ad.show(
-            onUserEarnedReward: (ad, reward) {
+            onUserEarnedReward:
+                (AdWithoutView ad, RewardItem reward) {
               earned = true;
             },
           );
         },
-        onAdFailedToLoad: (error) {
-          if (!completer.isCompleted) completer.complete(false);
+        onAdFailedToLoad: (LoadAdError error) {
+          if (!completer.isCompleted) {
+            completer.complete(false);
+          }
         },
       ),
     );
 
-    return completer.future.timeout(
-      const Duration(seconds: 90),
-      onTimeout: () => false,
-    );
+    try {
+      return await completer.future.timeout(
+        const Duration(seconds: 90),
+        onTimeout: () => false,
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
+  /// Interstitial reklam gösterir.
+  Future<bool> _showOneInterstitial() async {
+    if (!_initialized) {
+      try {
+        await initialize();
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final Completer<bool> completer = Completer<bool>();
+
+    await InterstitialAd.load(
+      adUnitId: AppConfig.effectiveInterstitialId,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (InterstitialAd ad) {
+          ad.fullScreenContentCallback =
+              FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (Ad ad) {
+              ad.dispose();
+
+              if (!completer.isCompleted) {
+                completer.complete(true);
+              }
+            },
+            onAdFailedToShowFullScreenContent:
+                (Ad ad, AdError error) {
+              ad.dispose();
+
+              if (!completer.isCompleted) {
+                completer.complete(false);
+              }
+            },
+          );
+
+          ad.show();
+        },
+        onAdFailedToLoad: (LoadAdError error) {
+          if (!completer.isCompleted) {
+            completer.complete(false);
+          }
+        },
+      ),
+    );
+
+    try {
+      return await completer.future.timeout(
+        const Duration(seconds: 60),
+        onTimeout: () => false,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------
+  // AdService IMPLEMENTASYONU
+  // -------------------------------------------------------
+
   @override
-  Future<Result<AdSession>> openSession({String adType = 'rewarded'}) async {
+  Future<Result<AdSession>> openSession({
+    String adType = 'rewarded',
+  }) async {
     if (!_initialized) {
       try {
         await initialize();
@@ -83,56 +185,78 @@ class AdMobAdService implements AdService {
         return Err('AdMob başlatılamadı: $e');
       }
     }
-    final id = _uuid.v4();
-    final s = AdSession(
+
+    final String id = _uuid.v4();
+
+    final AdSession session = AdSession(
       sessionId: id,
       adType: adType,
-      openedAt: DateTime.now(),
+      createdAt: DateTime.now(),
     );
-    _open[id] = s;
-    return Ok(s);
+
+    _open[id] = session;
+
+    return Ok(session);
   }
 
   @override
-  Future<Result<bool>> completeSession(String sessionId) async {
-    final s = _open[sessionId];
-    if (s == null) return const Err('Oturum bulunamadı');
-    if (s.completed) return const Err('Oturum zaten tamamlanmış');
+  Future<bool> showRewarded() async {
+    _rewardedEarned = false;
 
-    final ok = await _showOneRewarded();
-    if (!ok) return const Err('Reklam yüklenemedi veya ödül kazanılmadı');
+    final bool success = await _showOneRewarded();
 
-    _open[sessionId] = AdSession(
-      sessionId: s.sessionId,
-      adType: s.adType,
-      openedAt: s.openedAt,
-      completed: true,
-    );
-    return const Ok(true);
+    _rewardedEarned = success;
+
+    return success;
   }
 
   @override
-  Future<Result<int>> claimReward(String sessionId) async {
-    final s = _open[sessionId];
-    if (s == null || !s.completed) {
+  Future<bool> showInterstitial() async {
+    _interstitialShown = false;
+
+    final bool success = await _showOneInterstitial();
+
+    _interstitialShown = success;
+
+    return success;
+  }
+
+  @override
+  Future<Result<int>> claim(String sessionId) async {
+    final String id = sessionId.trim();
+
+    if (id.isEmpty) {
+      return const Err('Geçersiz oturum kimliği');
+    }
+
+    final AdSession? session = _open[id];
+
+    if (session == null) {
+      return const Err('Geçersiz veya süresi dolmuş oturum');
+    }
+
+    if (_watchedSessions.contains(id)) {
+      return const Err('Bu reklam oturumu zaten kullanıldı');
+    }
+
+    if (!_rewardedEarned) {
       return const Err('Önce reklamı tamamlayın');
     }
-    if (s.claimed) return const Err('Ödül zaten alınmış');
 
-    // Production: burada backend'e SSV / server verify gönderilmeli
+    /// Production'da burada backend / SSV doğrulaması yapılmalıdır.
     final credit = await _wallet.creditByReference(
-      referenceId: 'admob_$sessionId',
+      referenceId: 'admob_$id',
       reason: 'ad_reward',
     );
-    if (credit.isErr) return Err(credit.errorOrNull!);
 
-    _open[sessionId] = AdSession(
-      sessionId: s.sessionId,
-      adType: s.adType,
-      openedAt: s.openedAt,
-      completed: true,
-      claimed: true,
-    );
+    if (credit.isErr) {
+      return Err(credit.errorOrNull!);
+    }
+
+    _watchedSessions.add(id);
+
+    _rewardedEarned = false;
+
     return Ok(AppConfig.singleAdPoints);
   }
 
@@ -146,28 +270,49 @@ class AdMobAdService implements AdService {
       }
     }
 
-    var watched = 0;
+    var total = 0;
+
     for (var i = 0; i < 3; i++) {
-      final ok = await _showOneRewarded();
-      if (!ok) break;
-      watched++;
-    }
-    if (watched == 0) {
-      return const Err('Hiç reklam izlenemedi');
+      final sessionResult = await openSession(
+        adType: 'rewarded',
+      );
+
+      if (sessionResult.isErr) {
+        return Err(sessionResult.errorOrNull!);
+      }
+
+      final session = sessionResult.valueOrNull;
+
+      if (session == null) {
+        return const Err('Reklam oturumu oluşturulamadı');
+      }
+
+      final bool shown = await showRewarded();
+
+      if (!shown) {
+        return Err(
+          'Reklam ${i + 1}/3 gösterilemedi',
+        );
+      }
+
+      final claimResult = await claim(
+        session.sessionId,
+      );
+
+      if (claimResult.isErr) {
+        return Err(claimResult.errorOrNull!);
+      }
+
+      total += claimResult.valueOrNull ?? 0;
     }
 
-    final points = watched * AppConfig.singleAdPoints;
-    final ref =
-        'admob_triple_${DateTime.now().millisecondsSinceEpoch}_$watched';
-    final credit = await _wallet.creditByReference(
-      referenceId: ref,
-      reason: 'triple_ad',
-    );
-    if (credit.isErr) return Err(credit.errorOrNull!);
-    return Ok(points);
+    return Ok(total);
   }
 }
 
-AdService createAdMobAwareAdService(WalletService wallet) {
+/// AdMob aware servis oluşturucu.
+AdService createAdMobAwareAdService(
+  WalletService wallet,
+) {
   return AdMobAdService(wallet);
 }
