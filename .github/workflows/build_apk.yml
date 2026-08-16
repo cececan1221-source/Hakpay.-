@@ -8,17 +8,27 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+    steps:
+      - name: Repository Checkout
+        uses: actions/checkout@v4
+
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24.3"
           cache: true
 
       - name: Klasor Yapisini ve Importlari Duzelt
         run: |
-          mkdir -p lib/config lib/core lib/ui/widgets lib/repositories lib/services assets test
+          mkdir -p lib/config
+          mkdir -p lib/core
+          mkdir -p lib/ui/widgets
+          mkdir -p lib/repositories
+          mkdir -p lib/services
+          mkdir -p assets
+          mkdir -p test
+
           [ -f main.dart ] && mv -f main.dart lib/main.dart || true
           [ -f splash_screen.dart ] && mv -f splash_screen.dart lib/ui/ || true
           [ -f legacy_app.dart ] && mv -f legacy_app.dart lib/ui/ || true
@@ -27,23 +37,113 @@ jobs:
           [ -f result.dart ] && mv -f result.dart lib/core/ || true
           [ -f catalog_repository.dart ] && mv -f catalog_repository.dart lib/repositories/ || true
           [ -f glass_card.dart ] && mv -f glass_card.dart lib/ui/widgets/ || true
-          for f in ad_service.dart api_client.dart auth_service.dart billing_service.dart callback_verify.dart notification_service.dart service_locator.dart streak_referral_service.dart wallet_service.dart withdrawal_service.dart admob_ad_service.dart; do
+
+          for f in \
+            ad_service.dart \
+            api_client.dart \
+            auth_service.dart \
+            billing_service.dart \
+            callback_verify.dart \
+            notification_service.dart \
+            service_locator.dart \
+            streak_referral_service.dart \
+            wallet_service.dart \
+            withdrawal_service.dart \
+            admob_ad_service.dart
+          do
             [ -f "$f" ] && mv -f "$f" lib/services/ || true
           done
 
-      - name: Sifir Android Altyapisi Olustur (Gradle Hatasini Cozer)
+      - name: Eski Flutter Color API Hatalarini Otomatik Duzelt
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+
+          root = "lib"
+
+          for dirpath, _, filenames in os.walk(root):
+              for filename in filenames:
+                  if not filename.endswith(".dart"):
+                      continue
+
+                  path = os.path.join(dirpath, filename)
+
+                  with open(path, "r", encoding="utf-8") as f:
+                      content = f.read()
+
+                  original = content
+
+                  # Flutter 3.24.3 uyumlulugu:
+                  # withValues(alpha: X) -> withOpacity(X)
+                  content = re.sub(
+                      r'\.withValues\s*\(\s*alpha\s*:\s*([^)]+)\)',
+                      r'.withOpacity(\1)',
+                      content
+                  )
+
+                  # Yazim hatasi:
+                  # with0pacity -> withOpacity
+                  content = content.replace(
+                      ".with0pacity(",
+                      ".withOpacity("
+                  )
+
+                  # Cift nokta hatasi:
+                  # accent..withOpacity(...) -> accent.withOpacity(...)
+                  content = re.sub(
+                      r'\.\.withOpacity\(',
+                      r'.withOpacity(',
+                      content
+                  )
+
+                  if content != original:
+                      with open(path, "w", encoding="utf-8") as f:
+                          f.write(content)
+
+                      print(f"Duzeltildi: {path}")
+          PY
+
+      - name: Kalan Uyumsuz Color Kullanimlarini Kontrol Et
+        run: |
+          echo "=== withValues kontrolu ==="
+          if grep -RIn --include="*.dart" "withValues" lib; then
+            echo "HATA: withValues kullanimi hala mevcut."
+            exit 1
+          fi
+
+          echo "=== with0pacity kontrolu ==="
+          if grep -RIn --include="*.dart" "with0pacity" lib; then
+            echo "HATA: with0pacity kullanimi hala mevcut."
+            exit 1
+          fi
+
+          echo "=== Color API kontrolu tamamlandi ==="
+
+      - name: Sifir Android Altyapisi Olustur
         run: |
           rm -rf android
-          flutter create . --project-name hakpay --org com.hakpay --platforms=android
+          flutter create . \
+            --project-name hakpay \
+            --org com.hakpay \
+            --platforms=android
 
-      - name: APK Derle
+      - name: Flutter Temizle ve Bagimliliklari Yukle
         run: |
           flutter clean
           flutter pub get
+
+      - name: Dart Analiz
+        run: |
+          flutter analyze
+
+      - name: APK Derle
+        run: |
           flutter build apk --release
 
-      - uses: actions/upload-artifact@v4
+      - name: APK Artifact Yukle
+        uses: actions/upload-artifact@v4
         with:
           name: hakpay-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
+          if-no-files-found: error
